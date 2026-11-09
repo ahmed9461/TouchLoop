@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">لمسة</string>
+    <string name="service_summary">تسجيل وتسلسل النقرات والسحب</string>
+    <string name="service_description">تحتاج لمسة إلى خدمة إمكانية الوصول لإظهار التحكم العائم وتنفيذ الإيماءات التي تسجّلها بنفسك. تحفظ التسجيلات على جهازك.</string>
+    <string name="capture_count">● %1$d</string>
+    <string name="practice_count">لوحة الإيماءات\n\nالنقرات %1$d   |   السحبات %2$d</string>
+    <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowBackground">#101819</item>
+        <item name="android:colorAccent">#72E4C6</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#101819</item>
+        <item name="android:navigationBarColor">#101819</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+</resources>
