@@ -1,5 +1,7 @@
 package io.github.ahmed9461.touchloop;
 
+import android.view.Surface;
+
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -67,6 +69,13 @@ final class Routine {
         this.width = width;
         this.height = height;
         this.rotation = rotation;
+    }
+
+    String orientationLabel() {
+        if (width <= height) return "عمودي";
+        if (rotation == Surface.ROTATION_90) return "أفقي، أعلى الهاتف يسارًا";
+        if (rotation == Surface.ROTATION_270) return "أفقي، أعلى الهاتف يمينًا";
+        return "أفقي";
     }
 
     long sequenceDuration() {

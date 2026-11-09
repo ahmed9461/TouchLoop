@@ -64,12 +64,14 @@ public final class TouchService extends AccessibilityService implements Playback
     private KeyguardManager keyguard;
     private RoutineStore store;
     private LinearLayout hud;
+    private LinearLayout hudButtons;
     private WindowManager.LayoutParams hudParams;
     private CaptureView capture;
     private WindowManager.LayoutParams captureParams;
     private TextView count;
     private boolean folded;
     private float toolbarScale;
+    private String playbackNotice;
     private Routine recording;
     private Routine playing;
     private boolean liveCapture;
@@ -127,11 +129,14 @@ public final class TouchService extends AccessibilityService implements Playback
     boolean showControls() {
         if (hud != null) return true;
         hud = new LinearLayout(this);
-        hud.setGravity(Gravity.CENTER_VERTICAL);
+        hud.setOrientation(LinearLayout.VERTICAL);
         hud.setLayoutDirection(View.LAYOUT_DIRECTION_LTR);
         hud.setPadding(dp(4), dp(4), dp(4), dp(4));
         hud.setBackground(Theme.shape(this, Theme.BACK, 16, Theme.STROKE));
         hud.setElevation(dp(6));
+        hudButtons = new LinearLayout(this);
+        hudButtons.setGravity(Gravity.CENTER_VERTICAL);
+        hud.addView(hudButtons, new LinearLayout.LayoutParams(-2, -2));
         hud.addOnLayoutChangeListener((bar, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
             if (hud == bar) positionHud(hudParams.x, hudParams.y);
         });
@@ -157,7 +162,8 @@ public final class TouchService extends AccessibilityService implements Playback
             if (hud.isAttachedToWindow()) windows.updateViewLayout(hud, hudParams);
         }
         count = null;
-        hud.removeAllViews();
+        hudButtons.removeAllViews();
+        if (hud.getChildCount() > 1) hud.removeViewAt(1);
         int gripColor = folded && recording != null ? Theme.MINT
                 : folded && playback.running() ? Theme.DANGER : Theme.MUTED;
         TextView grip = hudAction("⠿", Theme.PANEL, gripColor, () -> {
@@ -210,6 +216,14 @@ public final class TouchService extends AccessibilityService implements Playback
             hudAction("إدارة", Theme.PANEL, Theme.INK, this::openApp);
             TextView hide = hudAction("×", Theme.PANEL, Theme.MUTED, () -> close(null));
             hide.setContentDescription("إخفاء الشريط العائم");
+            if (playbackNotice != null) {
+                TextView notice = Theme.text(this, playbackNotice, 13, Theme.DANGER, true);
+                notice.setTextDirection(View.TEXT_DIRECTION_RTL);
+                notice.setGravity(Gravity.END);
+                notice.setPadding(dp(8), dp(3), dp(8), dp(3));
+                notice.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+                hud.addView(notice, new LinearLayout.LayoutParams(-1, -2));
+            }
         }
     }
 
@@ -219,7 +233,7 @@ public final class TouchService extends AccessibilityService implements Playback
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, -2);
         params.leftMargin = dp(2);
         params.rightMargin = dp(2);
-        hud.addView(button, params);
+        hudButtons.addView(button, params);
         return button;
     }
 
@@ -247,6 +261,7 @@ public final class TouchService extends AccessibilityService implements Playback
             return;
         }
         refreshScreen();
+        playbackNotice = null;
         String name = "تسجيل " + new SimpleDateFormat("dd/MM HH:mm:ss", Locale.getDefault()).format(new Date());
         recording = new Routine(name, screen.width, screen.height, screen.rotation);
         lastUp = 0;
@@ -340,7 +355,7 @@ public final class TouchService extends AccessibilityService implements Playback
     private void startPlayback() {
         Routine routine = store.selected();
         if (routine == null) {
-            say("سجّل إيماءات أولًا");
+            showPlaybackNotice("سجّل إيماءات أولًا");
             return;
         }
         playing = routine;
@@ -350,10 +365,16 @@ public final class TouchService extends AccessibilityService implements Playback
         }
         if (problem != null) {
             playing = null;
-            say(problem);
+            showPlaybackNotice(problem);
             return;
         }
+        playbackNotice = null;
         playback.start(routine);
+        populateHud();
+    }
+
+    private void showPlaybackNotice(String message) {
+        playbackNotice = message;
         populateHud();
     }
 
@@ -363,8 +384,14 @@ public final class TouchService extends AccessibilityService implements Playback
             return "توقف التشغيل بسبب حرارة الجهاز";
         }
         Routine active = playing != null ? playing : recording;
-        if (active != null && !readScreen().matches(active)) {
-            return "أعد الشاشة لاتجاه التسجيل ودقته";
+        if (active != null) {
+            Screen current = readScreen();
+            if (current.rotation != active.rotation) {
+                return "جهة التشغيل المطلوبة: " + active.orientationLabel();
+            }
+            if (!current.matches(active)) {
+                return "دقة التسجيل المطلوبة: " + active.width + " × " + active.height;
+            }
         }
         return null;
     }
@@ -445,6 +472,10 @@ public final class TouchService extends AccessibilityService implements Playback
         Screen current = readScreen();
         if (current.equals(screen)) return;
         screen = current;
+        if (playbackNotice != null) {
+            playbackNotice = null;
+            populateHud();
+        }
         playback.stop("توقف التشغيل بسبب تغيّر اتجاه الشاشة أو دقتها");
         if (recording != null) {
             boolean hasSteps = !recording.steps.isEmpty();
@@ -469,6 +500,7 @@ public final class TouchService extends AccessibilityService implements Playback
 
     private void close(String message) {
         closing = true;
+        playbackNotice = null;
         playback.stop(message);
         discardRecording();
         removeOverlay(hud);

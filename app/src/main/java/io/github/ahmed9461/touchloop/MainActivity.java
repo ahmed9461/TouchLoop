@@ -118,7 +118,7 @@ public final class MainActivity extends Activity {
             boolean active = selected != null && selected.id.equals(routine.id);
             add(entry, text(routine.name, 18, Theme.INK, true), 3);
             String detail = routine.steps.size() + " خطوة  •  كل " + seconds(routine.period) + " ث"
-                    + (routine.width > routine.height ? "  •  أفقي" : "  •  عمودي")
+                    + "  •  " + routine.orientationLabel()
                     + (active ? "  •  مختار للتشغيل" : "");
             add(entry, text(detail, 14, active ? Theme.MINT : Theme.MUTED, false), 8);
             boolean oneCycle = routine.session <= Math.max(routine.period, routine.sequenceDuration());
