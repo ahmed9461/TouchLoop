@@ -19,6 +19,7 @@ final class Playback {
         final long deadline;
         long cycleStart;
         int index;
+        boolean dispatched;
 
         Run(Routine routine, long start) {
             this.routine = routine;
@@ -37,6 +38,10 @@ final class Playback {
 
     boolean running() {
         return active != null;
+    }
+
+    boolean hasDispatchedGesture() {
+        return active != null && active.dispatched;
     }
 
     void start(Routine routine) {
@@ -73,7 +78,9 @@ final class Playback {
         if (run.index == 0) run.cycleStart = now;
         if (!host.dispatch(step, duration, delivered -> completed(run, delivered))) {
             stop("توقف التشغيل: تعذّر إرسال الإيماءة");
+            return;
         }
+        run.dispatched = true;
     }
 
     private void completed(Run run, boolean delivered) {

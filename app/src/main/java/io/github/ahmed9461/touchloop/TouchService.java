@@ -118,7 +118,9 @@ public final class TouchService extends AccessibilityService implements Playback
         }
         if (Build.VERSION.SDK_INT >= 29 && !thermalRegistered) {
             thermalListener = status -> {
-                if (status >= PowerManager.THERMAL_STATUS_SEVERE) playback.stop("توقف التشغيل بسبب حرارة الجهاز");
+                if (status >= PowerManager.THERMAL_STATUS_CRITICAL && playback.running()) {
+                    playback.stop(thermalPlaybackMessage());
+                }
             };
             power.addThermalStatusListener(getMainExecutor(), thermalListener);
             thermalRegistered = true;
@@ -220,9 +222,10 @@ public final class TouchService extends AccessibilityService implements Playback
                 TextView notice = Theme.text(this, playbackNotice, 13, Theme.DANGER, true);
                 notice.setTextDirection(View.TEXT_DIRECTION_RTL);
                 notice.setGravity(Gravity.END);
+                notice.setMaxWidth(Theme.dp(this, 240 * toolbarScale + 16));
                 notice.setPadding(dp(8), dp(3), dp(8), dp(3));
                 notice.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-                hud.addView(notice, new LinearLayout.LayoutParams(-1, -2));
+                hud.addView(notice, new LinearLayout.LayoutParams(-2, -2));
             }
         }
     }
@@ -378,10 +381,15 @@ public final class TouchService extends AccessibilityService implements Playback
         populateHud();
     }
 
+    private String thermalPlaybackMessage() {
+        return (playback.hasDispatchedGesture() ? "توقف التشغيل." : "لم يبدأ التشغيل.")
+                + " حرارة حرجة بحسب أندرويد.";
+    }
+
     @Override public String interruption() {
         if (!power.isInteractive() || keyguard.isKeyguardLocked()) return "توقف التشغيل لأن الشاشة مقفلة";
-        if (Build.VERSION.SDK_INT >= 29 && power.getCurrentThermalStatus() >= PowerManager.THERMAL_STATUS_SEVERE) {
-            return "توقف التشغيل بسبب حرارة الجهاز";
+        if (Build.VERSION.SDK_INT >= 29 && power.getCurrentThermalStatus() >= PowerManager.THERMAL_STATUS_CRITICAL) {
+            return thermalPlaybackMessage();
         }
         Routine active = playing != null ? playing : recording;
         if (active != null) {
