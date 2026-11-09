@@ -60,4 +60,11 @@ final class Theme {
         });
         return button;
     }
+
+    static void sizeToolbarButton(Context context, TextView button, float scale) {
+        button.setTextSize(14 * scale);
+        button.setPadding(dp(context, 8 * scale), 0, dp(context, 8 * scale), 0);
+        button.setMinHeight(dp(context, 48 * scale));
+        button.setMinWidth(dp(context, 48 * scale));
+    }
 }

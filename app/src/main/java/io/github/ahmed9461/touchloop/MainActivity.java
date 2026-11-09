@@ -9,6 +9,8 @@ import android.os.Bundle;
 import android.provider.Settings;
 import android.text.InputFilter;
 import android.text.InputType;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -18,6 +20,7 @@ import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.SeekBar;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -97,6 +100,7 @@ public final class MainActivity extends Activity {
                     14, Theme.MUTED, false), 12);
             add(controls, button("فتح إعدادات إمكانية الوصول", true, this::openAccessibility), 0);
         }
+        add(controls, button("مظهر الشريط العائم", false, this::showToolbarAppearance), 0);
         add(content, controls, 16);
 
         ArrayList<Routine> routines = store.list();
@@ -117,6 +121,10 @@ public final class MainActivity extends Activity {
                     + (routine.width > routine.height ? "  •  أفقي" : "  •  عمودي")
                     + (active ? "  •  مختار للتشغيل" : "");
             add(entry, text(detail, 14, active ? Theme.MINT : Theme.MUTED, false), 8);
+            boolean oneCycle = routine.session <= Math.max(routine.period, routine.sequenceDuration());
+            add(entry, text("مدة الجلسة " + seconds(routine.session) + " ث"
+                    + (oneCycle ? "  •  تنتهي قبل بدء الدورة التالية" : ""),
+                    13, oneCycle ? Theme.DANGER : Theme.MUTED, false), 8);
             LinearLayout actions = row();
             place(actions, button("تعديل", false, () -> showEditor(routine)));
             if (!active) place(actions, button("اختيار للتشغيل", true, () -> {
@@ -153,6 +161,59 @@ public final class MainActivity extends Activity {
         startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
     }
 
+    private void showToolbarAppearance() {
+        LinearLayout fields = vertical();
+        fields.setPadding(dp(20), dp(12), dp(20), dp(8));
+        TextView preview = Theme.action(this, "⠿   سجّل", Theme.PANEL, Theme.MINT, () -> {});
+        preview.setClickable(false);
+        preview.setFocusable(false);
+        LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(-2, -2);
+        previewParams.gravity = Gravity.CENTER_HORIZONTAL;
+        previewParams.bottomMargin = dp(14);
+        fields.addView(preview, previewParams);
+
+        SeekBar size = appearanceSlider(fields, "الحجم", RoutineStore.MIN_TOOLBAR_SIZE,
+                RoutineStore.MAX_TOOLBAR_SIZE, store.toolbarSize(),
+                value -> Theme.sizeToolbarButton(this, preview, value / 100f));
+        SeekBar opacity = appearanceSlider(fields, "الوضوح", RoutineStore.MIN_TOOLBAR_OPACITY, 100,
+                store.toolbarOpacity(), value -> preview.setAlpha(value / 100f));
+        add(fields, text("اضغط المقبض لطي الأزرار أو فتحها. اسحبه لنقل الشريط.",
+                13, Theme.MUTED, false), 0);
+        new AlertDialog.Builder(this).setTitle("مظهر الشريط العائم").setView(fields)
+                .setNegativeButton("إلغاء", null)
+                .setPositiveButton("حفظ", (dialog, which) -> {
+                    store.setToolbarAppearance(RoutineStore.MIN_TOOLBAR_SIZE + size.getProgress() * 5,
+                            RoutineStore.MIN_TOOLBAR_OPACITY + opacity.getProgress() * 5);
+                    TouchService service = TouchService.current();
+                    if (service != null) service.populateHud();
+                }).show();
+    }
+
+    private SeekBar appearanceSlider(LinearLayout fields, String name, int minimum, int maximum,
+            int current, java.util.function.IntConsumer preview) {
+        TextView caption = text("", 14, Theme.INK, true);
+        add(fields, caption, 0);
+        SeekBar slider = new SeekBar(this);
+        slider.setContentDescription(name);
+        slider.setMax((maximum - minimum) / 5);
+        slider.setProgress((current - minimum) / 5);
+        slider.setMinimumHeight(dp(44));
+        add(fields, slider, 6);
+        slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                int value = minimum + progress * 5;
+                caption.setText(getString(R.string.toolbar_percent, name, value));
+                preview.accept(value);
+            }
+
+            @Override public void onStartTrackingTouch(SeekBar bar) {}
+            @Override public void onStopTrackingTouch(SeekBar bar) {}
+        });
+        caption.setText(getString(R.string.toolbar_percent, name, current));
+        preview.accept(current);
+        return slider;
+    }
+
     private void showEditor(Routine routine) {
         home = false;
         screen("محرّر التسجيل", "ضبط التكرار", "حدّد موعد بدء كل دورة وكيف تنفّذ خطواتها.");
@@ -167,11 +228,26 @@ public final class MainActivity extends Activity {
         preset(presets, period, "60");
         preset(presets, period, "600");
         add(editor, presets, 10);
-        EditText duration = input(editor, "مدة التشغيل الإجمالية (ثانية)", seconds(routine.session), true);
+        EditText duration = input(editor, "مدة الجلسة بالكامل (ثانية)", seconds(routine.session), true);
+        add(editor, text("تبدأ أول دورة فورًا. تنتهي الجلسة عند انقضاء هذه المدة حتى لو لم يحِن موعد التكرار.",
+                13, Theme.MUTED, false), 8);
+        TextView advice = text("", 13, Theme.DANGER, true);
+        add(editor, advice, 10);
         EditText gap = input(editor, "فاصل ثابت بين الخطوات (ثانية، اختياري)",
                 routine.fixedGap == Timing.RECORDED ? "" : seconds(routine.fixedGap), true);
         gap.setHint("فارغ = توقيت التسجيل");
         EditText speed = input(editor, "سرعة الإيماءات والتوقيت المسجّل (%)", String.valueOf(routine.speed), true);
+        TextWatcher timingChanges = new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override public void afterTextChanged(Editable s) {
+                updateSessionAdvice(routine, period, duration, gap, speed, advice);
+            }
+        };
+        for (EditText field : new EditText[]{period, duration, gap, speed}) {
+            field.addTextChangedListener(timingChanges);
+        }
+        updateSessionAdvice(routine, period, duration, gap, speed, advice);
         add(editor, text("المدة الحالية للتسلسل نحو " + seconds(routine.sequenceDuration())
                 + " ث. إذا انتهت الدورة بعد موعد التالية، تبدأ التالية بعد اكتمالها.",
                 13, Theme.MUTED, false), 12);
@@ -200,6 +276,33 @@ public final class MainActivity extends Activity {
                     showHome();
                 }).setNegativeButton("رجوع", null).show()), 8);
         add(content, button("رجوع إلى التسجيلات", false, this::showHome), 0);
+    }
+
+    private void updateSessionAdvice(Routine routine, EditText period, EditText duration, EditText gap,
+            EditText speed, TextView advice) {
+        advice.setVisibility(View.GONE);
+        try {
+            long cycle = Timing.parseMillis(period.getText().toString());
+            long session = Timing.parseMillis(duration.getText().toString());
+            long fixedGap = gap.length() == 0 ? Timing.RECORDED : Timing.parseMillis(gap.getText().toString());
+            long scaledSpeed = Timing.parseMillis(speed.getText().toString());
+            if (scaledSpeed < 25_000 || scaledSpeed > 300_000 || scaledSpeed % 1_000 != 0) return;
+            long sequence = routine.sequenceDuration(fixedGap, (int) (scaledSpeed / 1_000));
+            long twoCycles = Timing.twoCyclesDuration(sequence, cycle);
+            if (session >= twoCycles) return;
+            if (twoCycles > Timing.MAX_SESSION) {
+                advice.setText("اختصر التسلسل أو قلّل الفواصل ليكتمل تكراره ضمن 24 ساعة.");
+            } else {
+                long suggested = Math.min(Timing.MAX_SESSION / 1_000, (twoCycles + 1_999) / 1_000);
+                String message = session <= Math.max(cycle, sequence)
+                        ? "تنتهي الجلسة قبل بدء الدورة التالية."
+                        : "تنتهي الجلسة قبل اكتمال الدورة الثانية.";
+                advice.setText(getString(R.string.session_advice, message, suggested));
+            }
+            advice.setVisibility(View.VISIBLE);
+        } catch (IllegalArgumentException ignored) {
+            // Incomplete values are checked when saving.
+        }
     }
 
     private boolean saveEditor(Routine routine, EditText name, EditText period, EditText duration,

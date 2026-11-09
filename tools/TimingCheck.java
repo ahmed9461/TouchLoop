@@ -20,6 +20,8 @@ public final class TimingCheck {
         equal(1_500, Timing.nextCycle(1_000, 1_250, Timing.MIN_PERIOD));
         equal(601_000, Timing.nextCycle(1_000, 1_250, Timing.MAX_PERIOD));
         equal(1_800, Timing.nextCycle(1_000, 1_800, Timing.MIN_PERIOD));
+        equal(144_832, Timing.twoCyclesDuration(1_832, 143_000));
+        equal(4_000, Timing.twoCyclesDuration(2_000, 500));
         if (!Timing.fits(1_000, 100, 1_100) || Timing.fits(1_000, 101, 1_100)
                 || Timing.fits(1_100, 24, 1_100)) {
             throw new AssertionError("Session boundary");

@@ -22,6 +22,7 @@ import android.view.Display;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
 import android.widget.LinearLayout;
@@ -67,6 +68,8 @@ public final class TouchService extends AccessibilityService implements Playback
     private CaptureView capture;
     private WindowManager.LayoutParams captureParams;
     private TextView count;
+    private boolean folded;
+    private float toolbarScale;
     private Routine recording;
     private Routine playing;
     private boolean liveCapture;
@@ -145,16 +148,31 @@ public final class TouchService extends AccessibilityService implements Playback
     }
 
     @SuppressLint("ClickableViewAccessibility") // The drag grip also calls performClick on release.
-    private void populateHud() {
+    void populateHud() {
         if (hud == null) return;
+        toolbarScale = effectiveToolbarScale();
+        float alpha = store.toolbarOpacity() / 100f;
+        if (hudParams.alpha != alpha) {
+            hudParams.alpha = alpha;
+            if (hud.isAttachedToWindow()) windows.updateViewLayout(hud, hudParams);
+        }
+        count = null;
         hud.removeAllViews();
-        TextView grip = hudAction("⠿", Theme.PANEL, Theme.MUTED, () -> {});
-        grip.setContentDescription("مقبض سحب الشريط العائم");
+        int gripColor = folded && recording != null ? Theme.MINT
+                : folded && playback.running() ? Theme.DANGER : Theme.MUTED;
+        TextView grip = hudAction("⠿", Theme.PANEL, gripColor, () -> {
+            folded = !folded;
+            populateHud();
+        });
+        grip.setContentDescription(folded ? "فتح الشريط العائم. اسحب المقبض لتحريكه"
+                : "طي الشريط العائم. اسحب المقبض لتحريكه");
         grip.setOnTouchListener(new View.OnTouchListener() {
+            private final int slop = ViewConfiguration.get(TouchService.this).getScaledTouchSlop();
             private float downX;
             private float downY;
             private int originX;
             private int originY;
+            private boolean dragging;
 
             @Override public boolean onTouch(View view, MotionEvent event) {
                 if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
@@ -162,15 +180,21 @@ public final class TouchService extends AccessibilityService implements Playback
                     downY = event.getRawY();
                     originX = hudParams.x;
                     originY = hudParams.y;
+                    dragging = false;
                 } else if (event.getActionMasked() == MotionEvent.ACTION_MOVE) {
-                    positionHud(originX + Math.round(event.getRawX() - downX),
-                            originY + Math.round(event.getRawY() - downY));
+                    float dx = event.getRawX() - downX;
+                    float dy = event.getRawY() - downY;
+                    dragging |= Math.hypot(dx, dy) > slop;
+                    if (dragging) positionHud(originX + Math.round(dx), originY + Math.round(dy));
                 } else if (event.getActionMasked() == MotionEvent.ACTION_UP) {
-                    view.performClick();
+                    if (!dragging && Math.hypot(event.getRawX() - downX, event.getRawY() - downY) <= slop) {
+                        view.performClick();
+                    }
                 }
                 return true;
             }
         });
+        if (folded) return;
         if (recording != null) {
             count = hudAction("", Theme.PANEL, Theme.MUTED, () -> {});
             count.setClickable(false);
@@ -191,12 +215,17 @@ public final class TouchService extends AccessibilityService implements Playback
 
     private TextView hudAction(String title, int bg, int fg, Runnable command) {
         TextView button = Theme.action(this, title, bg, fg, command);
-        button.setPadding(dp(8), 0, dp(8), 0);
+        Theme.sizeToolbarButton(this, button, toolbarScale);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, -2);
         params.leftMargin = dp(2);
         params.rightMargin = dp(2);
         hud.addView(button, params);
         return button;
+    }
+
+    private float effectiveToolbarScale() {
+        // Five 48 dp buttons plus the horizontal margins and panel padding.
+        return Math.min(store.toolbarSize() / 100f, (screen.width - dp(28)) / (float) dp(240));
     }
 
     private void positionHud(int x, int y) {
@@ -272,6 +301,7 @@ public final class TouchService extends AccessibilityService implements Playback
     }
 
     private void updateCount() {
+        if (count == null) return;
         count.setText(getString(R.string.capture_count, recording.steps.size()));
         count.setContentDescription("عدد الخطوات " + recording.steps.size());
     }
@@ -423,7 +453,10 @@ public final class TouchService extends AccessibilityService implements Playback
             if (saved) say("حُفظت الخطوات المسجّلة قبل تغيّر الشاشة");
             else if (hasSteps) say("تعذّر حفظ الخطوات المسجّلة");
         }
-        if (hud != null) positionHud(hudParams.x, hudParams.y);
+        if (hud != null) {
+            if (toolbarScale != effectiveToolbarScale()) populateHud();
+            positionHud(hudParams.x, hudParams.y);
+        }
     }
 
     private int dp(int value) {

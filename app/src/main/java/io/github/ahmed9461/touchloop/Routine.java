@@ -70,11 +70,15 @@ final class Routine {
     }
 
     long sequenceDuration() {
+        return sequenceDuration(fixedGap, speed);
+    }
+
+    long sequenceDuration(long gap, int speedPercent) {
         long total = 0;
         for (int i = 0; i < steps.size(); i++) {
             Step step = steps.get(i);
-            if (i > 0) total += Timing.gap(step.gap, fixedGap, speed);
-            total += Timing.stroke(step.duration, speed);
+            if (i > 0) total += Timing.gap(step.gap, gap, speedPercent);
+            total += Timing.stroke(step.duration, speedPercent);
         }
         return total;
     }

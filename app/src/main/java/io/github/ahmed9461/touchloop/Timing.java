@@ -26,6 +26,10 @@ final class Timing {
         return Math.max(previousStart + period, finished);
     }
 
+    static long twoCyclesDuration(long sequence, long period) {
+        return nextCycle(0, sequence, period) + sequence;
+    }
+
     static boolean fits(long start, long duration, long deadline) {
         return start < deadline && duration <= deadline - start;
     }

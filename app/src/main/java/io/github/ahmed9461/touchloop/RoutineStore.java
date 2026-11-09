@@ -11,6 +11,9 @@ import java.util.ArrayList;
 
 final class RoutineStore {
     static final int MAX_ROUTINES = 30;
+    static final int MIN_TOOLBAR_SIZE = 75;
+    static final int MAX_TOOLBAR_SIZE = 125;
+    static final int MIN_TOOLBAR_OPACITY = 35;
     private final SharedPreferences prefs;
 
     RoutineStore(Context context) {
@@ -70,6 +73,18 @@ final class RoutineStore {
 
     void setLiveCapture(boolean live) {
         prefs.edit().putBoolean("liveCapture", live).apply();
+    }
+
+    int toolbarSize() {
+        return prefs.getInt("toolbarSize", 100);
+    }
+
+    int toolbarOpacity() {
+        return prefs.getInt("toolbarOpacity", 100);
+    }
+
+    void setToolbarAppearance(int size, int opacity) {
+        prefs.edit().putInt("toolbarSize", size).putInt("toolbarOpacity", opacity).apply();
     }
 
     private boolean write(ArrayList<Routine> routines, String selected) {
