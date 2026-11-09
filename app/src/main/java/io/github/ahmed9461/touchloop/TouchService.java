@@ -11,12 +11,14 @@ import android.content.IntentFilter;
 import android.content.res.Configuration;
 import android.graphics.Path;
 import android.graphics.PixelFormat;
+import android.hardware.display.DisplayManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.util.DisplayMetrics;
 import android.util.Log;
+import android.view.Display;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -32,16 +34,31 @@ import java.util.Date;
 import java.util.Locale;
 
 public final class TouchService extends AccessibilityService implements Playback.Host {
+    private record Screen(int width, int height, int rotation, int densityDpi) {
+        boolean matches(Routine routine) {
+            return width == routine.width && height == routine.height && rotation == routine.rotation;
+        }
+    }
+
     private static WeakReference<TouchService> instance = new WeakReference<>(null);
     private static WeakReference<Runnable> controlsChanged = new WeakReference<>(null);
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Playback playback = new Playback(handler, this);
+    private final DisplayManager.DisplayListener displayListener = new DisplayManager.DisplayListener() {
+        @Override public void onDisplayAdded(int id) {}
+        @Override public void onDisplayRemoved(int id) {}
+        @Override public void onDisplayChanged(int id) {
+            if (id == Display.DEFAULT_DISPLAY) refreshScreen();
+        }
+    };
     private final BroadcastReceiver screenEvents = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
             close("توقف التشغيل عند إطفاء الشاشة");
         }
     };
     private WindowManager windows;
+    private DisplayManager displays;
+    private Screen screen;
     private PowerManager power;
     private KeyguardManager keyguard;
     private RoutineStore store;
@@ -80,6 +97,11 @@ public final class TouchService extends AccessibilityService implements Playback
     @Override protected void onServiceConnected() {
         super.onServiceConnected();
         windows = getSystemService(WindowManager.class);
+        if (displays == null) {
+            displays = getSystemService(DisplayManager.class);
+            screen = readScreen();
+            displays.registerDisplayListener(displayListener, handler);
+        }
         power = getSystemService(PowerManager.class);
         keyguard = getSystemService(KeyguardManager.class);
         store = new RoutineStore(this);
@@ -107,6 +129,9 @@ public final class TouchService extends AccessibilityService implements Playback
         hud.setPadding(dp(4), dp(4), dp(4), dp(4));
         hud.setBackground(Theme.shape(this, Theme.BACK, 16, Theme.STROKE));
         hud.setElevation(dp(6));
+        hud.addOnLayoutChangeListener((bar, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+            if (hud == bar) positionHud(hudParams.x, hudParams.y);
+        });
         if (hudParams == null) {
             hudParams = overlay(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT);
             hudParams.setTitle("TouchLoop controls");
@@ -138,9 +163,8 @@ public final class TouchService extends AccessibilityService implements Playback
                     originX = hudParams.x;
                     originY = hudParams.y;
                 } else if (event.getActionMasked() == MotionEvent.ACTION_MOVE) {
-                    hudParams.x = originX + Math.round(event.getRawX() - downX);
-                    hudParams.y = originY + Math.round(event.getRawY() - downY);
-                    fitHud();
+                    positionHud(originX + Math.round(event.getRawX() - downX),
+                            originY + Math.round(event.getRawY() - downY));
                 } else if (event.getActionMasked() == MotionEvent.ACTION_UP) {
                     view.performClick();
                 }
@@ -163,10 +187,6 @@ public final class TouchService extends AccessibilityService implements Playback
             TextView hide = hudAction("×", Theme.PANEL, Theme.MUTED, () -> close(null));
             hide.setContentDescription("إخفاء الشريط العائم");
         }
-        LinearLayout bar = hud;
-        bar.post(() -> {
-            if (hud == bar && bar.isAttachedToWindow()) fitHud();
-        });
     }
 
     private TextView hudAction(String title, int bg, int fg, Runnable command) {
@@ -179,11 +199,15 @@ public final class TouchService extends AccessibilityService implements Playback
         return button;
     }
 
-    private void fitHud() {
-        DisplayMetrics metrics = displayMetrics();
-        int bottom = dp(48);
-        hudParams.x = Math.max(0, Math.min(hudParams.x, metrics.widthPixels - hud.getWidth()));
-        hudParams.y = Math.max(dp(32), Math.min(hudParams.y, metrics.heightPixels - hud.getHeight() - bottom));
+    private void positionHud(int x, int y) {
+        if (!hud.isAttachedToWindow()) return;
+        int maxX = Math.max(0, screen.width - hud.getWidth());
+        int maxY = Math.max(0, screen.height - hud.getHeight() - dp(48));
+        int left = Math.max(0, Math.min(x, maxX));
+        int top = Math.max(Math.min(dp(32), maxY), Math.min(y, maxY));
+        if (left == hudParams.x && top == hudParams.y) return;
+        hudParams.x = left;
+        hudParams.y = top;
         windows.updateViewLayout(hud, hudParams);
     }
 
@@ -193,9 +217,9 @@ public final class TouchService extends AccessibilityService implements Playback
             say("احذف تسجيلًا قبل إنشاء تسجيل جديد");
             return;
         }
-        DisplayMetrics metrics = displayMetrics();
+        refreshScreen();
         String name = "تسجيل " + new SimpleDateFormat("dd/MM HH:mm:ss", Locale.getDefault()).format(new Date());
-        recording = new Routine(name, metrics.widthPixels, metrics.heightPixels, rotation());
+        recording = new Routine(name, screen.width, screen.height, screen.rotation);
         lastUp = 0;
         liveCapture = store.liveCapture();
         capture = new CaptureView(this, recording.width, recording.height, this::recorded);
@@ -212,6 +236,7 @@ public final class TouchService extends AccessibilityService implements Playback
     }
 
     private void recorded(float[] points, long down, long up) {
+        refreshScreen();
         if (recording == null) return;
         long gap = lastUp == 0 ? 0 : down - lastUp;
         lastUp = up;
@@ -257,17 +282,20 @@ public final class TouchService extends AccessibilityService implements Playback
             say("سجّل إيماءة واحدة على الأقل");
             return;
         }
-        long duration = recording.sequenceDuration();
-        recording.period = Timing.clamp(duration + 500, 2_000, Timing.MAX_PERIOD);
-        recording.session = Timing.clamp(duration + 1_000, 30_000, Timing.MAX_SESSION);
         int total = recording.steps.size();
-        boolean saved = store.save(recording);
-        if (!saved) {
+        if (!persistRecording()) {
             say("تعذّر حفظ التسجيل");
             return;
         }
         discardRecording();
         say("تم حفظ " + total + " خطوة");
+    }
+
+    private boolean persistRecording() {
+        long duration = recording.sequenceDuration();
+        recording.period = Timing.clamp(duration + 500, 2_000, Timing.MAX_PERIOD);
+        recording.session = Timing.clamp(duration + 1_000, 30_000, Timing.MAX_SESSION);
+        return store.save(recording);
     }
 
     private void discardRecording() {
@@ -304,12 +332,9 @@ public final class TouchService extends AccessibilityService implements Playback
         if (Build.VERSION.SDK_INT >= 29 && power.getCurrentThermalStatus() >= PowerManager.THERMAL_STATUS_SEVERE) {
             return "توقف التشغيل بسبب حرارة الجهاز";
         }
-        if (playing != null) {
-            DisplayMetrics metrics = displayMetrics();
-            if (metrics.widthPixels != playing.width || metrics.heightPixels != playing.height
-                    || rotation() != playing.rotation) {
-                return "أعد الشاشة لاتجاه التسجيل ودقته";
-            }
+        Routine active = playing != null ? playing : recording;
+        if (active != null && !readScreen().matches(active)) {
+            return "أعد الشاشة لاتجاه التسجيل ودقته";
         }
         return null;
     }
@@ -378,15 +403,27 @@ public final class TouchService extends AccessibilityService implements Playback
     }
 
     @SuppressWarnings("deprecation")
-    private DisplayMetrics displayMetrics() {
+    private Screen readScreen() {
+        Display display = displays.getDisplay(Display.DEFAULT_DISPLAY);
         DisplayMetrics metrics = new DisplayMetrics();
-        windows.getDefaultDisplay().getRealMetrics(metrics);
-        return metrics;
+        display.getRealMetrics(metrics);
+        return new Screen(metrics.widthPixels, metrics.heightPixels, display.getRotation(), metrics.densityDpi);
     }
 
-    @SuppressWarnings("deprecation")
-    private int rotation() {
-        return windows.getDefaultDisplay().getRotation();
+    private void refreshScreen() {
+        if (displays == null) return;
+        Screen current = readScreen();
+        if (current.equals(screen)) return;
+        screen = current;
+        playback.stop("توقف التشغيل بسبب تغيّر اتجاه الشاشة أو دقتها");
+        if (recording != null) {
+            boolean hasSteps = !recording.steps.isEmpty();
+            boolean saved = hasSteps && persistRecording();
+            discardRecording();
+            if (saved) say("حُفظت الخطوات المسجّلة قبل تغيّر الشاشة");
+            else if (hasSteps) say("تعذّر حفظ الخطوات المسجّلة");
+        }
+        if (hud != null) positionHud(hudParams.x, hudParams.y);
     }
 
     private int dp(int value) {
@@ -414,8 +451,7 @@ public final class TouchService extends AccessibilityService implements Playback
 
     @Override public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
-        close("توقف التشغيل بسبب تغيّر إعدادات الشاشة");
-        hudParams = null;
+        refreshScreen();
     }
 
     @Override public boolean onUnbind(Intent intent) {
@@ -428,6 +464,7 @@ public final class TouchService extends AccessibilityService implements Playback
         if (current() == this) publish(null);
         close(null);
         handler.removeCallbacksAndMessages(null);
+        if (displays != null) displays.unregisterDisplayListener(displayListener);
         if (receiverRegistered) unregisterReceiver(screenEvents);
         if (Build.VERSION.SDK_INT >= 29 && thermalRegistered) power.removeThermalStatusListener(thermalListener);
         super.onDestroy();
