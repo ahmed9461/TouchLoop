@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-java@v5
@@ -16,8 +16,8 @@ jobs:
           distribution: temurin
           java-version: '17'
           cache: gradle
-      - name: Install Android SDK platform
-        run: sdkmanager "platforms;android-35" "build-tools;36.0.0"
+      - name: Verify Android SDK platform
+        run: test -f "$ANDROID_HOME/platforms/android-35/android.jar"
       - name: Check scheduler timing
         run: |
           javac -encoding UTF-8 -d build/timing app/src/main/java/io/github/ahmed9461/touchloop/Timing.java tools/TimingCheck.java
