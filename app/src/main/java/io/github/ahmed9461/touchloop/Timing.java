@@ -22,12 +22,12 @@ final class Timing {
         return fixed == RECORDED ? Math.round(recorded * 100.0 / speed) : fixed;
     }
 
-    static long nextCycle(long previousStart, long finished, long period) {
-        return Math.max(previousStart + period, finished);
+    static long nextCycle(long origin, long cycle, long finished, long period) {
+        return Math.max(origin + cycle * period, finished);
     }
 
     static long twoCyclesDuration(long sequence, long period) {
-        return nextCycle(0, sequence, period) + sequence;
+        return nextCycle(0, 1, sequence, period) + sequence;
     }
 
     static boolean fits(long start, long duration, long deadline) {

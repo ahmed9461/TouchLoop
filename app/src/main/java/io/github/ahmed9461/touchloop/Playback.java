@@ -17,7 +17,8 @@ final class Playback {
     private static final class Run {
         final Routine routine;
         final long deadline;
-        long cycleStart;
+        long origin;
+        long cycle;
         int index;
         boolean dispatched;
 
@@ -75,7 +76,7 @@ final class Playback {
             stop("اكتملت مدة التشغيل");
             return;
         }
-        if (run.index == 0) run.cycleStart = now;
+        if (run.index == 0 && run.cycle == 0) run.origin = now;
         if (!host.dispatch(step, duration, delivered -> completed(run, delivered))) {
             stop("توقف التشغيل: تعذّر إرسال الإيماءة");
             return;
@@ -93,7 +94,8 @@ final class Playback {
         run.index++;
         if (run.index == run.routine.steps.size()) {
             run.index = 0;
-            schedule(run, Timing.nextCycle(run.cycleStart, now, run.routine.period));
+            run.cycle++;
+            schedule(run, Timing.nextCycle(run.origin, run.cycle, now, run.routine.period));
             return;
         }
         Routine.Step next = run.routine.steps.get(run.index);
